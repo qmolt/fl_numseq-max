@@ -7,6 +7,7 @@ void ext_main(void *r)
 	class_addmethod(c, (method)fl_numseq_assist, "assist", A_CANT, 0);
 
 	class_addmethod(c, (method)fl_numseq_lists, "list", A_GIMME, 0);
+	class_addmethod(c, (method)fl_numseq_beats_list, "beats", A_GIMME, 0);
 	class_addmethod(c, (method)fl_numseq_multigate_mode, "multigate_mode", A_GIMME, 0);
 	class_addmethod(c, (method)fl_numseq_manual_sequence, "step", A_GIMME, 0);
 	class_addmethod(c, (method)fl_numseq_play_mode, "play_mode", A_GIMME, 0);
@@ -42,7 +43,8 @@ void *fl_numseq_new(t_symbol *s, short argc, t_atom *argv)
 	x->fs = sys_getsr();
 
 	x->note_palette_length = -1;
-	x->sequence_length = -1;
+	x->index_sequence_length = -1;
+	x->beat_sequence_length = -1;
 	x->note_palette = (float *)sysmem_newptr(MAXIMUM_SEQUENCE_LENGTH * sizeof(float));
 	if (!x->note_palette) { object_error((t_object*)x, "error: out of memory for note_sequence array"); }
 	x->index_sequence = (long *)sysmem_newptr(MAXIMUM_SEQUENCE_LENGTH * sizeof(long));
@@ -138,6 +140,7 @@ void fl_numseq_lists(t_fl_numseq* x, t_symbol* msg, short argc, t_atom* argv)
 			if (i < ac) { x->index_sequence[i] = (long)atom_getlong(ap + i); }
 			else { x->index_sequence[i] = 0; }
 		}
+		x->index_sequence_length = ac;
 		x->index_sequence_init = 1;
 		break;
 
@@ -151,13 +154,73 @@ void fl_numseq_lists(t_fl_numseq* x, t_symbol* msg, short argc, t_atom* argv)
 		for (long i = 0; i < ac; i++) {
 			x->beatstart_sequence[i] = (float)atom_getfloat(ap + i); 
 		}
-		x->sequence_length = ac;
+		x->beat_sequence_length = ac;
 		x->beatstart_sequence_init = 1;
 		break;
 
 	default: 
 		break;
 	}
+}
+
+void fl_numseq_beats_list(t_fl_numseq *x, t_symbol *msg, short argc, t_atom *argv)
+{
+	long ac = argc;
+	t_atom *ap = argv;
+	char *odd_arg;
+	float even_arg;
+	float total_beats;
+	long n_instruc;
+	long index_beat;
+	long index_string;
+	float beat_accum;
+	long len_subseq;
+
+	if (!ac || (ac % 2) != 0) { object_error((t_object *)x, "message must have an even set of arguments"); return; }
+
+	total_beats = 0.f;
+	for (long i = 0; i < ac; i++) {
+		switch (i % 2) {
+		case 0: 
+			if (atom_gettype(ap + i) != A_LONG && atom_gettype(ap + i) != A_FLOAT) { object_error((t_object *)x, "even arg must be a number"); return; }
+			total_beats += (float)atom_getfloat(ap + i);
+			break;
+
+		case 1:
+			if (atom_gettype(ap + i) != A_SYM) { object_error((t_object *)x, "odd arg must be a symbol"); return; }
+			break;
+
+		default:
+			break;
+		}
+	}
+	x->beats_bar = (float)MAX(total_beats, 1.);
+	x->samps_bar = (long)(x->beats_bar * x->samps_beat);
+
+	n_instruc = ac / 2;
+	index_beat = 0;
+	beat_accum = 0.f;
+	for (long i = 0; i < n_instruc; i++) {
+
+		even_arg = (float)atom_getfloat(ap + i + i);
+		odd_arg = atom_getsym(ap + i + i + 1)->s_name;
+		if (odd_arg[0] != '<') { object_warn((t_object *)x, "empezar lista con '<'"); }
+		
+		index_string = 0;
+		while (odd_arg[index_string] != '\0') { index_string++; }
+		len_subseq = MAX(index_string, 1);
+
+		for (long i = 1; i < len_subseq; i++) {
+			if (odd_arg[i] == '1') {
+				if (index_beat >= MAXIMUM_SEQUENCE_LENGTH) { object_warn((t_object *)x, "max list size reached: %d", MAXIMUM_SEQUENCE_LENGTH); return; }
+
+				x->beatstart_sequence[index_beat++] = beat_accum + even_arg * ((float)i - 1.f) / (float)MAX(len_subseq - 1, 1);
+			}
+		}		
+		beat_accum += even_arg;
+	}
+	x->beat_sequence_length = index_beat;
+	x->beatstart_sequence_init = 1;
 }
 
 void fl_numseq_multigate_mode(t_fl_numseq *x, t_symbol *msg, short argc, t_atom *argv)
@@ -217,7 +280,7 @@ void fl_numseq_play_seq(t_fl_numseq *x)
 		break;
 	case BACKWARD:
 		x->samps_count = x->samps_bar;
-		x->n_seq = x->sequence_length - 1;
+		x->n_seq = x->beat_sequence_length - 1;
 		break;
 	case FOR_AND_BACK:
 		x->samps_count = 0;
@@ -226,7 +289,7 @@ void fl_numseq_play_seq(t_fl_numseq *x)
 		break;
 	case BACK_AND_FOR:
 		x->samps_count = x->samps_bar - 1;
-		x->n_seq = x->sequence_length - 1;
+		x->n_seq = x->beat_sequence_length - 1;
 		x->first_seq_done = 0;
 		break;
 	default:
@@ -262,7 +325,7 @@ void fl_numseq_manual_sequence(t_fl_numseq *x, t_symbol *msg, short argc, t_atom
 	if (n != n || n < 0) { return; }
 	if (n > MAXIMUM_SEQUENCE_LENGTH) { object_error((t_object *)x, "index out of bounds"); return; }
 
-	long index = x->index_sequence[n % x->sequence_length];
+	long index = x->index_sequence[n % x->index_sequence_length];
 	float note = x->note_palette[index % x->note_palette_length];
 	outlet_float(x->m_outlet, note);
 }
@@ -300,7 +363,8 @@ void fl_numseq_perform64(t_fl_numseq* x, t_object* dsp64, double** inputs, long 
 	long *pindex_sequence = x->index_sequence;
 	float *pbeatstart_sequence = x->beatstart_sequence;
 	long note_pal_len = x->note_palette_length;
-	long seq_len = x->sequence_length;
+	long beat_seq_len = x->beat_sequence_length;
+	long index_seq_len = x->index_sequence_length;
 
 	long samps_beat = x->samps_beat;
 	long samps_step = samps_beat;
@@ -320,8 +384,8 @@ void fl_numseq_perform64(t_fl_numseq* x, t_object* dsp64, double** inputs, long 
 	
 	while (n--) {
 		if (msbeat_connected) { 
-			samps_step = (long)(*msbeat_signal++ * mfs);
-			samps_bar = (long)(beats_bar * samps_step);
+			samps_beat = (long)(*msbeat_signal++ * mfs);
+			samps_bar = (long)(beats_bar * samps_beat);
 		}
 
 		switch (play_state) {
@@ -330,10 +394,10 @@ void fl_numseq_perform64(t_fl_numseq* x, t_object* dsp64, double** inputs, long 
 
 		case FORWARD:
 			samps_count++;
-			if (index < seq_len) {
-				samps_step = (long)(samps_beat * pbeatstart_sequence[index]);
+			if (index < beat_seq_len) {
+				samps_step = (long)(samps_beat * pbeatstart_sequence[index % beat_seq_len]);
 				if (samps_count >= samps_step) {
-					x->note_out = pnote_palette[pindex_sequence[index] % note_pal_len];
+					x->note_out = pnote_palette[pindex_sequence[index % index_seq_len] % note_pal_len];
 					clock_delay(x->note_clock, 0);
 
 					index++;
@@ -348,9 +412,9 @@ void fl_numseq_perform64(t_fl_numseq* x, t_object* dsp64, double** inputs, long 
 		case BACKWARD:
 			samps_count--;
 			if (index >= 0) {
-				samps_step = (long)(samps_beat * pbeatstart_sequence[index]);
+				samps_step = (long)(samps_beat * pbeatstart_sequence[index % beat_seq_len]);
 				if (samps_count < samps_step) {
-					x->note_out = pnote_palette[pindex_sequence[index] % note_pal_len];
+					x->note_out = pnote_palette[pindex_sequence[index % index_seq_len] % note_pal_len];
 					clock_delay(x->note_clock, 0);
 
 					index--;
@@ -366,9 +430,9 @@ void fl_numseq_perform64(t_fl_numseq* x, t_object* dsp64, double** inputs, long 
 			if (first_seq_done) { 
 				samps_count--;
 				if (index >= 0) {
-					samps_step = (long)(samps_beat * pbeatstart_sequence[index]);
+					samps_step = (long)(samps_beat * pbeatstart_sequence[index % beat_seq_len]);
 					if (samps_count < samps_step) {
-						x->note_out = pnote_palette[pindex_sequence[index] % note_pal_len];
+						x->note_out = pnote_palette[pindex_sequence[index % index_seq_len] % note_pal_len];
 						clock_delay(x->note_clock, 0);
 
 						index--;
@@ -381,10 +445,10 @@ void fl_numseq_perform64(t_fl_numseq* x, t_object* dsp64, double** inputs, long 
 			}
 			else { 
 				samps_count++;
-				if (index < seq_len) {
-					samps_step = (long)(samps_beat * pbeatstart_sequence[index]);
+				if (index < beat_seq_len) {
+					samps_step = (long)(samps_beat * pbeatstart_sequence[index % beat_seq_len]);
 					if (samps_count >= samps_step) {
-						x->note_out = pnote_palette[pindex_sequence[index] % note_pal_len];
+						x->note_out = pnote_palette[pindex_sequence[index % index_seq_len] % note_pal_len];
 						clock_delay(x->note_clock, 0);
 
 						index++;
@@ -392,7 +456,7 @@ void fl_numseq_perform64(t_fl_numseq* x, t_object* dsp64, double** inputs, long 
 				}
 				if (samps_count > samps_bar) {
 					first_seq_done = 1;
-					index = seq_len - 1;
+					index = beat_seq_len - 1;
 					samps_count = samps_bar;
 				}
 			}
@@ -401,10 +465,10 @@ void fl_numseq_perform64(t_fl_numseq* x, t_object* dsp64, double** inputs, long 
 		case BACK_AND_FOR:
 			if(first_seq_done){
 				samps_count++;
-				if (index < seq_len) {
-					samps_step = (long)(samps_beat * pbeatstart_sequence[index]);
+				if (index < beat_seq_len) {
+					samps_step = (long)(samps_beat * pbeatstart_sequence[index % beat_seq_len]);
 					if (samps_count >= samps_step) {
-						x->note_out = pnote_palette[pindex_sequence[index] % note_pal_len];
+						x->note_out = pnote_palette[pindex_sequence[index % index_seq_len] % note_pal_len];
 						clock_delay(x->note_clock, 0);
 
 						index++;

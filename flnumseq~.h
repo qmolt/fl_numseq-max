@@ -46,8 +46,9 @@ typedef struct _fl_numseq {
 	float *note_palette;
 	long note_palette_length;
 	long *index_sequence;
+	long index_sequence_length;
 	float *beatstart_sequence;
-	long sequence_length;
+	long beat_sequence_length;
 	long n_seq;
 
 	float note_out;
@@ -75,6 +76,7 @@ void fl_numseq_assist(t_fl_numseq* x, void* b, long msg, long arg, char* dst);
 void fl_numseq_free(t_fl_numseq *x);
 
 void fl_numseq_lists(t_fl_numseq *x, t_symbol *msg, short argc, t_atom *argv);
+void fl_numseq_beats_list(t_fl_numseq *x, t_symbol *msg, short argc, t_atom *argv);
 void fl_numseq_multigate_mode(t_fl_numseq *x, t_symbol *msg, short argc, t_atom *argv);
 void fl_numseq_manual_sequence(t_fl_numseq *x, t_symbol *msg, short argc, t_atom *argv);
 void fl_numseq_play_mode(t_fl_numseq *x, t_symbol *msg, short argc, t_atom *argv);

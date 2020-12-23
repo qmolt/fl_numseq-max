@@ -8,7 +8,6 @@ It is possible to select a multigate mode, a play mode, and a bar size. The sequ
 It's functionality is very basic: 
 
 - it doesn't sort the lists provided so it won't recognize a greater time start before another index on the sequence.
-- index and time start lists must have the same size but this difference won't be checked (size is determined by time starts: it won't output errors in case of difference, just 0 value index)
 
 
 ### Inlets and Outlets
@@ -32,6 +31,7 @@ It's functionality is very basic:
 - play_mode (i): 1:forward, 2:backward, 3:forward-backward, 4:backward-forward
 - multigate_mode (i): 0/1
 - bar_size (f): size in periods
+- beats (f) (s)...: duration (beats) of subsequence, symbol starting in '<' of '1's and '0's. 
 - (bang): starts sequence
 
 ------------------------------------------------------
@@ -40,3 +40,7 @@ It's functionality is very basic:
 
 **v0.1**
 - first version
+
+**v0.2**
+- index wrapping on index, palette, and beat start sequences
+- beats list message added 
